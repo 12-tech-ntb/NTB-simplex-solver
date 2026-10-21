@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simplex Solver</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="modern-header">
+      <!-- Khối 1: Logo và Tiêu đề -->
+      <div class="header-left">
+        <div class="logo-haui">HAUI</div>
+        <div class="app-title">Hệ Thống <span>Tối Ưu</span></div>
+      </div>
+
+      <!-- Khối 2: Điều hướng dạng thẻ nổi (Segmented Control) -->
+      <div class="header-nav">
+        <div id="nav-1" class="nav-step active" onclick="handleNavClick(1)">
+          1. Nhập bài toán
+        </div>
+        <div id="nav-2" class="nav-step disabled" onclick="handleNavClick(2)">
+          2. Các bước giải
+        </div>
+        <div id="nav-3" class="nav-step disabled" onclick="handleNavClick(3)">
+          3. Kết quả
+        </div>
+      </div>
+
+      <!-- Khối 3: Nút chức năng -->
+      <div class="header-right">
+        <button class="btn-new" onclick="location.reload()">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Mới
+        </button>
+      </div>
+    </header>
+
+    <div class="container">
+      <!-- VIEW 1: NHẬP LIỆU -->
+      <div id="view-input" class="view active">
+        <aside class="sidebar">
+          <h2>Thiết lập</h2>
+          <div class="form-group">
+            <label>Số biến (n)</label>
+            <!-- Bỏ value="2", thêm placeholder gợi ý -->
+            <input
+              type="number"
+              id="inp-vars"
+              class="form-control"
+              placeholder="Ví dụ: 2"
+              min="1"
+            />
+          </div>
+          <div class="form-group">
+            <label>Số ràng buộc (m)</label>
+            <!-- Bỏ value="3", thêm placeholder gợi ý -->
+            <input
+              type="number"
+              id="inp-cons"
+              class="form-control"
+              placeholder="Ví dụ: 3"
+              min="1"
+            />
+          </div>
+          <div class="form-group">
+            <label>Mục tiêu</label>
+            <select id="inp-type" class="form-control">
+              <option value="MAX">MAX</option>
+              <option value="MIN">MIN</option>
+            </select>
+          </div>
+          <button
+            class="btn btn-primary"
+            style="width: 100%; margin-top: 10px"
+            onclick="generateMatrix()"
+          >
+            Tạo Ma Trận
+          </button>
+        </aside>
+        <!-- KHỐI HƯỚNG DẪN SỬ DỤNG (Chỉ hiện ở màn hình Setup) -->
+        <div class="welcome-guide">
+          <h1>Công cụ Giải Toán Tối Ưu</h1>
+          <p>
+            Chào mừng bạn đến với hệ thống giải Quy hoạch tuyến tính. Nền tảng
+            tự động nhận diện dấu, lật bất phương trình và xử lý đa thuật toán
+            (Simplex & Big-M).
+          </p>
+
+          <div class="guide-steps">
+            <div class="step-item">
+              <span class="step-icon">1</span>
+              <div>
+                <strong>Khởi tạo bài toán</strong>
+                <span
+                  >Nhập số lượng biến quyết định và số ràng buộc vào khung thiết
+                  lập bên cạnh.</span
+                >
+              </div>
+            </div>
+            <div class="step-item">
+              <span class="step-icon">2</span>
+              <div>
+                <strong>Nhập liệu linh hoạt</strong>
+                <span
+                  >Hệ thống hỗ trợ nhập phân số, số âm và tự động xử lý các dấu
+                  (≤, ≥, =).</span
+                >
+              </div>
+            </div>
+            <div class="step-item">
+              <span class="step-icon">3</span>
+              <div>
+                <strong>Phân tích từng bước</strong>
+                <span
+                  >Xuất ra lời giải chi tiết, giải thích cách chọn phần tử xoay
+                  và bảng tối ưu cuối.</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="team-info">
+            💻 Phát triển bởi: Haui - Kỹ thuật phần mềm
+          </div>
+        </div>
+        <main class="workspace">
+          <div class="panel">
+            <div class="panel-title">1. Hàm mục tiêu</div>
+            <table class="matrix-table" id="obj-table">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <div class="panel-title">2. Hệ ràng buộc</div>
+            <table class="matrix-table" id="cons-table">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+
+            <div id="non-negative-condition" class="condition-box">
+              Điều kiện không âm: x<sub>1</sub>, x<sub>2</sub> &ge; 0
+            </div>
+          </div>
+          <div
+            style="
+              text-align: right;
+              display: flex;
+              justify-content: flex-end;
+              gap: 15px;
+              margin-top: 10px;
+            "
+          >
+            <!-- NÚT XÓA DỮ LIỆU (Icon Thùng rác) -->
+            <button
+              class="btn btn-outline"
+              onclick="clearInputs()"
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                color: #ef4444;
+                border-color: #fca5a5;
+                font-size: 16px;
+                padding: 12px 30px;
+              "
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+              Xóa dữ liệu
+            </button>
+
+            <!-- NÚT BÀI MẪU (Icon Tài liệu) -->
+            <button
+              class="btn btn-outline"
+              onclick="loadSampleProblem()"
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                color: #047857;
+                background-color: #ecfdf5;
+                border-color: #6ee7b7;
+                font-size: 16px;
+                padding: 12px 30px;
+              "
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"
+                />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <line x1="10" y1="9" x2="8" y2="9" />
+              </svg>
+              Bài mẫu
+            </button>
+
+            <!-- NÚT GIẢI BÀI TOÁN (Icon Play) -->
+            <button
+              class="btn btn-primary"
+              onclick="startSolving()"
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                font-size: 16px;
+                padding: 12px 30px;
+              "
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              Giải bài toán
+            </button>
+          </div>
+        </main>
+      </div>
+
+      <!-- VIEW 2: CÁC BƯỚC GIẢI -->
+      <div id="view-steps" class="view">
+        <div class="steps-layout">
+          <!-- Cột trái: Nội dung các bước -->
+          <div class="steps-main" id="steps-container">
+            <!-- Javascript sẽ đổ dữ liệu Bài toán, Dạng chuẩn và Các bảng Đơn hình vào đây -->
+          </div>
+
+          <!-- Cột phải: Sidebar trạng thái giống thiết kế -->
+          <div class="steps-sidebar">
+            <div class="sidebar-pre-title">BƯỚC HIỆN TẠI</div>
+            <div class="sidebar-title">Kiểm tra tối ưu</div>
+
+            <div class="status-list">
+              <div class="status-item">
+                <div class="status-icon">📈</div>
+                <div class="status-info">
+                  <span class="status-label">TRẠNG THÁI</span>
+                  <span
+                    class="status-value"
+                    style="font-weight: 700; color: var(--text-main)"
+                    >Đã tính toán xong</span
+                  >
+                </div>
+              </div>
+              <div class="status-item">
+                <div class="status-icon">🔄</div>
+                <div class="status-info">
+                  <span class="status-label">BẢNG ĐƠN HÌNH</span>
+                  <span class="status-value">Xem chi tiết bên trái</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="info-card">
+              Bảng đơn hình: Δ<sub>j</sub> = Z<sub>j</sub> - C<sub>j</sub>.
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px">
+          <button
+            class="btn btn-primary"
+            onclick="showView(3)"
+            style="padding: 12px 30px; font-size: 16px"
+          >
+            Xem kết quả cuối ➔
+          </button>
+        </div>
+      </div>
+
+      <!-- VIEW 3: KẾT QUẢ -->
+      <div id="view-result" class="view">
+        <div class="panel result-box">
+          <h2>🎉 Đã tìm thấy phương án tối ưu!</h2>
+          <div class="result-val" id="final-fmax"></div>
+          <div
+            id="final-solution"
+            style="font-size: 18px; margin-bottom: 20px"
+          ></div>
+          <button class="btn btn-outline" onclick="showView(2)">
+            🔙 Xem lại các bước
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Khung chứa thông báo Custom Toast -->
+    <div id="custom-toast" class="toast-container">
+      <div class="toast-icon">⚠️</div>
+      <div class="toast-message" id="toast-text">Thông báo</div>
+    </div>
+    <!-- Phần chân trang (Footer) -->
+    <div id="app-footer" class="app-footer">
+      Hệ Thống Tối Ưu · Tính toán thuật toán Đơn hình
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
