@@ -1106,3 +1106,70 @@ body {
     transform: translateX(0);
   }
 }
+
+/* ===== BỔ SUNG: đồ thị, hiệu ứng, in ấn ===== */
+.view.active {
+  animation: viewIn 0.35s ease;
+}
+@keyframes viewIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.graph-card {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+}
+.graph-svg {
+  width: 100%;
+  max-width: 640px;
+  display: block;
+  margin: 12px auto 0;
+  font-family: "Segoe UI", sans-serif;
+}
+.graph-legend {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.graph-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.result-actions {
+  flex-wrap: wrap;
+}
+@media print {
+  .modern-header,
+  .app-footer,
+  .result-actions,
+  .steps-sidebar,
+  .toast-container {
+    display: none !important;
+  }
+  .view {
+    display: none !important;
+  }
+  #view-result {
+    display: block !important;
+  }
+  body {
+    background: #fff;
+  }
+}
