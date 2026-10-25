@@ -692,6 +692,24 @@ function startSolving() {
     }
   }
 
+  let degAlt = null;
+  if (status === "OPTIMAL" && !hasInfinite) {
+    degAlt = findDegenerateAlternative(
+      tableau,
+      basis,
+      C_j,
+      finalDeltas,
+      m,
+      n,
+      totalVars,
+    );
+    if (degAlt) {
+      hasInfinite = true;
+      for (let j = 0; j < totalVars; j++)
+        if (!basis.includes(j) && finalDeltas[j].isZero() && C_j[j].m.isZero())
+          infiniteVars.push(varNames[j]);
+    }
+  }
   let altX = null,
     altHTML = "",
     infeasHTML = "";
@@ -707,7 +725,7 @@ function startSolving() {
         .join("") +
       `<li>Hàm mục tiêu còn chứa M (F = ${finalDeltas[totalVars]}), tức là chỉ "khả thi" khi chấp nhận vi phạm ràng buộc. Mọi Δ<sub>j</sub> đã hết vi phạm nên không thể giảm tổng vi phạm thêm. Vậy hệ <b>không có phương án khả thi</b>.</li></ol></div>`;
   }
-  if (hasInfinite) {
+  if (hasInfinite && !degAlt) {
     const j = infiniteCols[0];
     let ratios = [],
       best = null,
@@ -745,6 +763,22 @@ function startSolving() {
         ? `<br><i>Các biến khác cũng có Δ = 0: ${infiniteVars.slice(1).join(", ")}.</i>`
         : "") +
       `</div>`;
+  }
+
+  if (degAlt) {
+    const x1 = new Array(n).fill(ZERO);
+    for (let i = 0; i < m; i++)
+      if (basis[i] < n) x1[basis[i]] = tableau[i][totalVars];
+    const zVal = (x) => x.reduce((s, v, k) => s.add(C_input[k].mul(v)), ZERO);
+    const intro = `Bài toán <b>suy biến</b> (có biến cơ sở bằng 0) nên từ bảng cuối không có phép xoay θ &gt; 0 trực tiếp. Tuy vậy, nếu thực hiện thêm các phép xoay suy biến (θ = 0) rồi tiếp tục, vẫn rời được khỏi đỉnh này mà F không đổi.<br>`;
+    let body;
+    if (degAlt.vertex) {
+      altX = degAlt.vertex;
+      body = `X¹ = ${fx(x1)} → F = ${zVal(x1)}<br>X² = ${fx(altX)} → F = ${zVal(altX)}<br>Hai đỉnh cùng tối ưu nên mọi điểm trên đoạn nối chúng cũng tối ưu: <b>X = λX¹ + (1−λ)X²</b>, 0 ≤ λ ≤ 1.`;
+    } else {
+      body = `Tập nghiệm tối ưu kéo dài vô hạn theo một tia: <b>X = X¹ + t·d</b> (t ≥ 0), với X¹ = ${fx(x1)}, d = ${fx(degAlt.ray)}.`;
+    }
+    altHTML = `<div style="margin-top:16px;padding:18px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;color:#78350f;font-size:15px;line-height:1.7;"><b>Vì sao có vô số nghiệm tối ưu?</b><br>${intro}${body}</div>`;
   }
 
   // RENDER GIAO DIỆN KẾT LUẬN
@@ -1158,11 +1192,96 @@ function buildPivotCalc(oldT, newT, pr, pc, m, tv, varNames, basis, leave, k) {
   const step3 = others
     ? `<p><b>Bước 3: Khử cột ${enter} ở các hàng còn lại.</b> Hàng mới = hàng cũ − a × (hàng xoay mới), với a là phần tử của hàng đó ở cột ${enter}. Nếu a = 0 thì hàng giữ nguyên.</p><div class="calc-scroll"><table class="calc-table">${head}${others}</table></div>`
     : "";
-  return `<details class="calc-details"><summary>🧮 Xem cách tính bảng ${k + 1} từ bảng ${k}</summary><div class="calc-body"><p><b>Bước 1: Phần tử xoay.</b> Biến <b>${enter}</b> vào cơ sở, biến <b>${leave}</b> ra khỏi cơ sở; phần tử xoay p = ${p}.</p><p><b>Bước 2: Chia hàng xoay cho p.</b> Hàng mới = hàng cũ ÷ p.</p><div class="calc-scroll"><table class="calc-table">${head}${pivRow}</table></div>${step3}<p><b>Bước ${others ? 4 : 3}: Tính lại dòng Δ.</b> Δ<sub>j</sub> = Z<sub>j</sub> − C<sub>j</sub> = Σ C<sub>B</sub>·a<sub>ij</sub> − C<sub>j</sub>, dùng hệ số C<sub>B</sub> và các cột của bảng ${k + 1}.</p></div></details>`;
+  return `<details class="calc-details"><summary>🔢 Xem cách tính bảng ${k + 1} từ bảng ${k}</summary><div class="calc-body"><p><b>Bước 1: Phần tử xoay.</b> Biến <b>${enter}</b> vào cơ sở, biến <b>${leave}</b> ra khỏi cơ sở; phần tử xoay p = ${p}.</p><p><b>Bước 2: Chia hàng xoay cho p.</b> Hàng mới = hàng cũ ÷ p.</p><div class="calc-scroll"><table class="calc-table">${head}${pivRow}</table></div>${step3}<p><b>Bước ${others ? 4 : 3}: Tính lại dòng Δ.</b> Δ<sub>j</sub> = Z<sub>j</sub> − C<sub>j</sub> = Σ C<sub>B</sub>·a<sub>ij</sub> − C<sub>j</sub>, dùng hệ số C<sub>B</sub> và các cột của bảng ${k + 1}.</p></div></details>`;
 }
 
 function toggleAllCalc() {
   const ds = [...document.querySelectorAll(".calc-details")];
   const open = ds.some((d) => !d.open);
   ds.forEach((d) => (d.open = open));
+}
+
+// ========================================================
+// PHÁT HIỆN VÔ SỐ NGHIỆM KHI SUY BIẾN (mặt tối ưu có nhiều hơn 1 điểm)
+// Tối đa hóa tổng các biến không cơ sở có Δ = 0 trên mặt tối ưu bằng đơn hình chính xác.
+// Nếu tổng này có thể dương (hoặc không bị chặn) thì tồn tại nghiệm tối ưu khác.
+// ========================================================
+function findDegenerateAlternative(T0, basis0, C_j, deltas, m, n, tv) {
+  const T = T0.map((r) => r.slice());
+  const B = [...basis0];
+  const isArt = (j) => !C_j[j].m.isZero();
+  const S = [];
+  for (let j = 0; j < tv; j++)
+    if (!B.includes(j) && !isArt(j) && deltas[j].isZero()) S.push(j);
+  if (!S.length) return null;
+  const inS = new Set(S);
+  // Biến được phép thay đổi trên mặt tối ưu: cơ sở hiện tại + biến có Δ = 0 (biến Δ ≠ 0 và biến giả bị ép bằng 0)
+  const allowed = (j) =>
+    !isArt(j) && (basis0.includes(j) || deltas[j].isZero());
+  const cObj = (j) => (inS.has(j) ? ONE : ZERO);
+  const pivot = (r, c) => {
+    const pv = T[r][c];
+    for (let j = 0; j <= tv; j++) T[r][j] = T[r][j].div(pv);
+    for (let i = 0; i < m; i++) {
+      if (i === r) continue;
+      const f = T[i][c];
+      if (!f.isZero())
+        for (let j = 0; j <= tv; j++) T[i][j] = T[i][j].sub(f.mul(T[r][j]));
+    }
+    B[r] = c;
+  };
+  // Đẩy biến giả (giá trị 0) ra khỏi cơ sở nếu hàng đó còn liên hệ với các biến trong S
+  for (let i = 0; i < m; i++) {
+    if (!isArt(B[i])) continue;
+    let c = -1;
+    for (let j = 0; j < tv; j++)
+      if (!B.includes(j) && allowed(j) && !T[i][j].isZero()) {
+        c = j;
+        break;
+      }
+    if (c !== -1) pivot(i, c);
+  }
+  const point = () => {
+    const x = new Array(n).fill(ZERO);
+    for (let i = 0; i < m; i++) if (B[i] < n) x[B[i]] = T[i][tv];
+    return x;
+  };
+  for (let guard = 0; guard < 2000; guard++) {
+    let val = ZERO;
+    for (let i = 0; i < m; i++) val = val.add(cObj(B[i]).mul(T[i][tv]));
+    if (val.isPositive()) return { vertex: point() };
+    let enter = -1;
+    for (let j = 0; j < tv; j++) {
+      if (B.includes(j) || !allowed(j)) continue;
+      let z = ZERO;
+      for (let i = 0; i < m; i++) z = z.add(cObj(B[i]).mul(T[i][j]));
+      if (z.sub(cObj(j)).isNegative()) {
+        enter = j;
+        break;
+      }
+    }
+    if (enter === -1) return null;
+    let row = -1,
+      best = null;
+    for (let i = 0; i < m; i++) {
+      if (!T[i][enter].isPositive()) continue;
+      const r = T[i][tv].div(T[i][enter]);
+      if (
+        best === null ||
+        r.cmp(best) < 0 ||
+        (r.cmp(best) === 0 && B[i] < B[row])
+      ) {
+        best = r;
+        row = i;
+      }
+    }
+    if (row === -1) {
+      const d = new Array(n).fill(ZERO);
+      for (let i = 0; i < m; i++) if (B[i] < n) d[B[i]] = ZERO.sub(T[i][enter]);
+      if (enter < n) d[enter] = ONE;
+      return { ray: d };
+    }
+    pivot(row, enter);
+  }
+  return null;
 }
