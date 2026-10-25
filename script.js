@@ -20,6 +20,7 @@ function lockNavigation() {
 }
 
 function showView(viewIndex) {
+  if (window.scrollTo) window.scrollTo({ top: 0, behavior: "smooth" });
   document
     .querySelectorAll(".view")
     .forEach((v) => v.classList.remove("active"));
@@ -613,6 +614,8 @@ function startSolving() {
       thetas,
     );
 
+    const oldT = tableau.map((r) => r.slice());
+    const leaveName = varNames[basis[pivotRow]];
     // CẬP NHẬT BIẾN CƠ SỞ SAU KHI TÌM ĐƯỢC PHẦN TỬ XOAY
     basis[pivotRow] = pivotCol;
 
@@ -627,6 +630,19 @@ function startSolving() {
       }
     }
 
+    stepsHTML += buildPivotCalc(
+      oldT,
+      tableau,
+      pivotRow,
+      pivotCol,
+      m,
+      totalVars,
+      varNames,
+      basis,
+      leaveName,
+      iteration,
+    );
+
     iteration++;
     if (iteration > 1000) {
       status = "ITER_LIMIT";
@@ -636,11 +652,13 @@ function startSolving() {
 
   // PHÂN BIỆT RÕ CÁC TRẠNG THÁI CUỐI CÙNG
   let hasArtificial = false;
+  let infeasRows = [];
   let artVarsInBasis = [];
   if (status === "OPTIMAL") {
     for (let i = 0; i < m; i++) {
       if (!C_j[basis[i]].m.isZero() && tableau[i][totalVars].isPositive()) {
         hasArtificial = true;
+        infeasRows.push(i);
         artVarsInBasis.push(
           `<b>${varNames[basis[i]]}</b> = ${tableau[i][totalVars].toString()}`,
         );
@@ -652,6 +670,7 @@ function startSolving() {
   // NHẬN DIỆN VÔ SỐ NGHIỆM
   let hasInfinite = false;
   let infiniteVars = [];
+  let infiniteCols = [];
   if (status === "OPTIMAL") {
     for (let j = 0; j < totalVars; j++) {
       if (basis.includes(j) || !finalDeltas[j].isZero() || !C_j[j].m.isZero())
@@ -668,8 +687,64 @@ function startSolving() {
       if (!hasPos || minRatio.isPositive()) {
         hasInfinite = true;
         infiniteVars.push(varNames[j]);
+        infiniteCols.push(j);
       }
     }
+  }
+
+  let altX = null,
+    altHTML = "",
+    infeasHTML = "";
+  const fx = (arr) => "(" + arr.map((v) => v.toString()).join(", ") + ")";
+  if (status === "INFEASIBLE") {
+    infeasHTML =
+      `<div style="margin-top:16px;padding:18px;background:#fff;border:1px solid #fecaca;border-radius:10px;color:#7f1d1d;font-size:15px;line-height:1.7;"><b>Giải thích chi tiết:</b><ol style="margin:8px 0 0 20px;">` +
+      infeasRows
+        .map((i) => {
+          const zeroRow = window.lastLP.A[i].every((a) => a === 0);
+          return `<li>Ràng buộc (${i + 1}) vẫn cần biến giả <b>${varNames[basis[i]]}</b> = ${tableau[i][totalVars]} > 0 mới thỏa mãn.${zeroRow ? ` Hàng này có mọi hệ số bằng 0 nên thực chất là <b>0 = ${window.lastLP.B[i]}</b>, một điều vô lý.` : ""}</li>`;
+        })
+        .join("") +
+      `<li>Hàm mục tiêu còn chứa M (F = ${finalDeltas[totalVars]}), tức là chỉ "khả thi" khi chấp nhận vi phạm ràng buộc. Mọi Δ<sub>j</sub> đã hết vi phạm nên không thể giảm tổng vi phạm thêm. Vậy hệ <b>không có phương án khả thi</b>.</li></ol></div>`;
+  }
+  if (hasInfinite) {
+    const j = infiniteCols[0];
+    let ratios = [],
+      best = null,
+      pr = -1;
+    for (let i = 0; i < m; i++)
+      if (tableau[i][j].isPositive()) {
+        const r = tableau[i][totalVars].div(tableau[i][j]);
+        ratios.push(`${varNames[basis[i]]}: ${r}`);
+        if (best === null || r.cmp(best) < 0) {
+          best = r;
+          pr = i;
+        }
+      }
+    const x1 = new Array(n).fill(ZERO);
+    for (let i = 0; i < m; i++)
+      if (basis[i] < n) x1[basis[i]] = tableau[i][totalVars];
+    const zVal = (x) => x.reduce((s, v, k) => s.add(C_input[k].mul(v)), ZERO);
+    let body;
+    if (pr === -1) {
+      const d = new Array(totalVars).fill(ZERO);
+      for (let i = 0; i < m; i++) d[basis[i]] = ZERO.sub(tableau[i][j]);
+      d[j] = ONE;
+      body = `Cột ${varNames[j]} không có phần tử dương nên ${varNames[j]} tăng tùy ý mà vẫn khả thi: tập nghiệm tối ưu kéo dài vô hạn.<br><b>X = X¹ + t·d</b> (t ≥ 0), với X¹ = ${fx(x1)}, d = ${fx(d.slice(0, n))}.`;
+    } else {
+      const xs = new Array(totalVars).fill(ZERO);
+      for (let i = 0; i < m; i++)
+        xs[basis[i]] = tableau[i][totalVars].sub(best.mul(tableau[i][j]));
+      xs[j] = best;
+      altX = xs.slice(0, n);
+      body = `Tỉ số θ: ${ratios.join("; ")}; θ<sub>min</sub> = ${best} (dòng ${varNames[basis[pr]]} ra)${best.isPositive() ? ", xoay được sang đỉnh mới." : "."}<br>X¹ = ${fx(x1)} → F = ${zVal(x1)}<br>X² = ${fx(altX)} → F = ${zVal(altX)}<br>Hai đỉnh cùng tối ưu nên mọi điểm trên đoạn nối chúng cũng tối ưu: <b>X = λX¹ + (1−λ)X²</b>, 0 ≤ λ ≤ 1.`;
+    }
+    altHTML =
+      `<div style="margin-top:16px;padding:18px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;color:#78350f;font-size:15px;line-height:1.7;"><b>Vì sao có vô số nghiệm tối ưu?</b><br>Biến không cơ sở ${varNames[j]} có Δ<sub>${j + 1}</sub> = 0: đưa ${varNames[j]} vào cơ sở thì F không đổi.<br>${body}` +
+      (infiniteCols.length > 1
+        ? `<br><i>Các biến khác cũng có Δ = 0: ${infiniteVars.slice(1).join(", ")}.</i>`
+        : "") +
+      `</div>`;
   }
 
   // RENDER GIAO DIỆN KẾT LUẬN
@@ -679,7 +754,7 @@ function startSolving() {
     let inVar = varNames[unboundedCol];
     stepsHTML += `<div class="modern-step-card" style="border: 2px solid #8b5cf6; box-shadow: 0 10px 40px -10px rgba(139, 92, 246, 0.2);"><div class="modern-step-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;"><div class="modern-badge" style="background:#8b5cf6; color:white; border-color:#8b5cf6;">Kết luận</div><div><h3 class="modern-title" style="color: #6d28d9;">BÀI TOÁN KHÔNG GIỚI HẠN (Unbounded)</h3><p class="modern-subtitle">Không tồn tại phương án tối ưu hữu hạn.</p></div></div><div style="margin-top: 20px; padding: 20px; background: #f5f3ff; border-radius: 8px; border: 1px dashed #c4b5fd; color: #4c1d95; font-size: 15px; line-height: 1.6;"><b>Nguyên nhân Toán học:</b> Cột biến vào <b>${inVar}</b> được chọn, nhưng tất cả các hệ số trong cột này đều <b>&le; 0</b>, dẫn đến không thể tính được giá trị Theta (θ).<br><br><b>Ý nghĩa thực tế:</b> Hàm mục tiêu sẽ tiến tới <b>vô cực (±&infin;)</b> mà không bị cản lại bởi bất kỳ ràng buộc nào.</div>${renderTableau(tableau, m, totalVars, basis, iteration, false, C_j, varNames, finalDeltas, -1, -1, [], { title: "📋 Bảng tại thời điểm phát hiện (bằng chứng)", titleColor: "#6d28d9", statusHTML: `<div style="background:#f5f3ff;color:#6d28d9;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:bold;margin-bottom:15px;border:1px solid #c4b5fd;display:inline-block;">Cột ${inVar} có Δ vi phạm nhưng mọi phần tử đều ≤ 0 nên không tính được θ.</div>` })}</div>`;
   } else if (status === "INFEASIBLE") {
-    stepsHTML += `<div class="modern-step-card" style="border: 2px solid #ef4444; box-shadow: 0 10px 40px -10px rgba(239, 68, 68, 0.2);"><div class="modern-step-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;"><div class="modern-badge" style="background:#ef4444; color:white; border-color:#ef4444;">Kết luận</div><div><h3 class="modern-title" style="color: #b91c1c;">BÀI TOÁN VÔ NGHIỆM (Infeasible)</h3><p class="modern-subtitle">Hệ ràng buộc mâu thuẫn, không tồn tại phương án khả thi.</p></div></div><div style="margin-top: 20px; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px dashed #fca5a5; color: #991b1b; font-size: 15px; line-height: 1.6;">Biến giả vẫn tồn tại trong cơ sở với giá trị dương (${artVarsInBasis.join(", ")}). Điều này chứng tỏ hệ ràng buộc đang mâu thuẫn trực tiếp với nhau, không có vùng nghiệm chung.</div>${renderTableau(
+    stepsHTML += `<div class="modern-step-card" style="border: 2px solid #ef4444; box-shadow: 0 10px 40px -10px rgba(239, 68, 68, 0.2);"><div class="modern-step-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;"><div class="modern-badge" style="background:#ef4444; color:white; border-color:#ef4444;">Kết luận</div><div><h3 class="modern-title" style="color: #b91c1c;">BÀI TOÁN VÔ NGHIỆM (Infeasible)</h3><p class="modern-subtitle">Hệ ràng buộc mâu thuẫn, không tồn tại phương án khả thi.</p></div></div><div style="margin-top: 20px; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px dashed #fca5a5; color: #991b1b; font-size: 15px; line-height: 1.6;">Biến giả vẫn tồn tại trong cơ sở với giá trị dương (${artVarsInBasis.join(", ")}). Điều này chứng tỏ hệ ràng buộc đang mâu thuẫn trực tiếp với nhau, không có vùng nghiệm chung.</div>${infeasHTML}${renderTableau(
       tableau,
       m,
       totalVars,
@@ -699,7 +774,7 @@ function startSolving() {
       },
     )}</div>`;
   } else if (hasInfinite) {
-    stepsHTML += `<div class="modern-step-card" style="border: 2px solid #f59e0b; box-shadow: 0 10px 40px -10px rgba(245, 158, 11, 0.2);"><div class="modern-step-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;"><div class="modern-badge" style="background:#f59e0b; color:white; border-color:#f59e0b;">Kết luận</div><div><h3 class="modern-title" style="color: #d97706;">VÔ SỐ NGHIỆM TỐI ƯU</h3><p class="modern-subtitle">Phát hiện biến không cơ sở <b>${infiniteVars.join(", ")}</b> có Δ<sub>j</sub> = 0.</p></div></div><div style="margin-top: 20px;">${renderTableau(tableau, m, totalVars, basis, iteration, true, C_j, varNames, finalDeltas)}</div></div>`;
+    stepsHTML += `<div class="modern-step-card" style="border: 2px solid #f59e0b; box-shadow: 0 10px 40px -10px rgba(245, 158, 11, 0.2);"><div class="modern-step-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;"><div class="modern-badge" style="background:#f59e0b; color:white; border-color:#f59e0b;">Kết luận</div><div><h3 class="modern-title" style="color: #d97706;">VÔ SỐ NGHIỆM TỐI ƯU</h3><p class="modern-subtitle">Phát hiện biến không cơ sở <b>${infiniteVars.join(", ")}</b> có Δ<sub>j</sub> = 0.</p></div></div><div style="margin-top: 20px;">${renderTableau(tableau, m, totalVars, basis, iteration, true, C_j, varNames, finalDeltas)}${altHTML}</div></div>`;
   } else {
     stepsHTML += `<div class="modern-step-card" style="border: 2px solid #10b981; box-shadow: 0 10px 40px -10px rgba(16, 185, 129, 0.2);"><div class="modern-step-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;"><div class="modern-badge" style="background:#10b981; color:white; border-color:#10b981;">Kết luận</div><div><h3 class="modern-title" style="color: #059669;">Bảng Tối Ưu Cuối Cùng (Nghiệm duy nhất)</h3><p class="modern-subtitle">Phương án đã thỏa mãn điều kiện tối ưu</p></div></div><div style="margin-top: 20px;">${renderTableau(tableau, m, totalVars, basis, iteration, true, C_j, varNames, finalDeltas)}</div></div>`;
   }
@@ -724,7 +799,7 @@ function startSolving() {
     varCardsHTML = `<div style="padding: 20px; text-align: center; color: #64748b; width: 100%; font-style: italic; background: #f8fafc; border-radius: 8px;">Không thể xác định giá trị cụ thể các biến do trạng thái bài toán: <b>${status}</b>.</div>`;
   } else {
     for (let i = 0; i < n; i++) {
-      varCardsHTML += `<div class="var-card active-var" ${hasInfinite ? 'style="border-color:#fcd34d; background:#fffbeb;"' : ""}><div class="var-name" ${hasInfinite ? 'style="color:#d97706;"' : ""}>x<sub>${i + 1}</sub></div><div class="var-val" ${hasInfinite ? 'style="color:#b45309;"' : ""}>${solution[i].toString()}</div></div>`;
+      varCardsHTML += `<div class="var-card active-var"><div class="var-name">x<sub>${i + 1}</sub></div><div class="var-val">${solution[i].toString()}</div></div>`;
     }
   }
 
@@ -763,30 +838,67 @@ function startSolving() {
 
   window.lastResultText =
     status === "OPTIMAL"
-      ? `${type}: Z_opt = ${zStr}; ` +
-        solution.map((v, i) => `x${i + 1} = ${v}`).join(", ")
+      ? `F_${isMax ? "max" : "min"} = ${zStr}; X* = ${fx(solution)}` +
+        (altX ? `; X² = ${fx(altX)}` : "")
       : heroTitle;
   let graphHTML =
-    n === 2 && status === "OPTIMAL" ? renderGraph(window.lastLP, solution) : "";
-  let extraNote =
+    n === 2 && status !== "ITER_LIMIT"
+      ? renderGraph(
+          window.lastLP,
+          status === "OPTIMAL" ? solution : null,
+          status,
+          altX,
+        )
+      : "";
+  const theme =
     status === "UNBOUNDED"
-      ? `<div style="font-size:15px; color:#fff; margin-top:8px; opacity:0.9;">Khu vực nghiệm mở rộng tới vô cực, hàm mục tiêu không có đỉnh dừng.</div>`
-      : hasInfinite
-        ? `<div style="font-size:15px; color:#fff; margin-top:8px; opacity:0.9;">(Phương án hiển thị bên dưới chỉ là một trong các điểm cực biên)</div>`
-        : "";
+      ? "violet"
+      : status === "INFEASIBLE" || status === "ITER_LIMIT"
+        ? "rose"
+        : hasInfinite
+          ? "amber"
+          : "emerald";
+  const pivots = iteration - 1;
+  const badgeText = {
+    OPTIMAL:
+      pivots === 0
+        ? "Phương án ban đầu đã tối ưu (0 phép xoay Đơn hình)."
+        : `Tìm thấy phương án tối ưu sau ${pivots} phép xoay Đơn hình.`,
+    UNBOUNDED: `Phát hiện bài toán không giới hạn sau ${pivots} phép xoay Đơn hình.`,
+    INFEASIBLE: `Kết luận vô nghiệm sau ${pivots} phép xoay Đơn hình.`,
+    ITER_LIMIT: `Dừng khẩn cấp sau ${pivots} phép xoay Đơn hình.`,
+  }[status];
+  const extraNote = {
+    emerald: "Không phát hiện phương án tối ưu nào khác.",
+    amber: "Đây chỉ là một trong vô số phương án tối ưu (điểm cực biên).",
+    violet: "Miền khả thi mở rộng tới vô cực, hàm mục tiêu không có đỉnh dừng.",
+    rose:
+      status === "ITER_LIMIT"
+        ? "Thuật toán dừng do vượt giới hạn lặp, kết quả không đáng tin."
+        : "Hệ ràng buộc mâu thuẫn, không tồn tại phương án khả thi.",
+  }[theme];
+  const fLabel = `F<sub>${isMax ? "max" : "min"}</sub>`;
+  const heroValue =
+    status === "INFEASIBLE" || status === "ITER_LIMIT"
+      ? zStr
+      : `${fLabel} = ${zStr}`;
+  const symVec =
+    n <= 6
+      ? solution.map((_, i) => `x<sub>${i + 1}</sub>`).join(", ")
+      : "x<sub>1</sub>, …, x<sub>n</sub>";
+  let vecHTML = "";
+  if (status === "OPTIMAL") {
+    vecHTML =
+      `<div class="vec-box"><span class="vec-label">${hasInfinite ? "X<sup>1</sup>" : "X<sup>*</sup>"}</span> = (${symVec}) = <span class="vec-val">${fx(solution)}</span>` +
+      (altX
+        ? `<br><span class="vec-label">X<sup>2</sup></span> = <span class="vec-val">${fx(altX)}</span><div class="vec-note">Tập nghiệm tối ưu: X = λX<sup>1</sup> + (1 − λ)X<sup>2</sup>, λ ∈ [0, 1]</div>`
+        : hasInfinite
+          ? `<div class="vec-note">Tập nghiệm tối ưu kéo dài vô hạn theo một tia (xem giải thích ở trang các bước).</div>`
+          : "") +
+      `</div>`;
+  }
 
-  let btnColor =
-    status === "UNBOUNDED"
-      ? "background:#8b5cf6; border-color:#8b5cf6;"
-      : status === "INFEASIBLE"
-        ? "background:#ef4444; border-color:#ef4444;"
-        : status === "ITER_LIMIT"
-          ? "background:#64748b; border-color:#64748b;"
-          : hasInfinite
-            ? "background:#f59e0b; border-color:#f59e0b;"
-            : "";
-
-  let resultHTML = `<div class="result-container"><div class="result-hero" style="${heroBg}"><h2>${heroTitle}</h2><div class="result-zopt">Z<sub>opt</sub> = ${zStr}</div>${extraNote}</div><div class="result-body"><div class="result-section-title">${hasInfinite ? "Một phương án cực biên tối ưu" : "Giá trị các biến quyết định"}</div><div class="var-grid">${varCardsHTML}</div>${graphHTML}<div class="result-actions"><button class="btn-modern btn-outline" onclick="showView(2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> Xem lại các bước</button><button class="btn-modern btn-outline" onclick="window.print()">🖨 In / Lưu PDF</button><button class="btn-modern btn-outline" onclick="copyResult()">📋 Sao chép</button><button class="btn-modern btn-primary" style="${btnColor}" onclick="location.reload()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Giải bài toán mới</button></div></div></div>`;
+  let resultHTML = `<div class="result-container theme-${theme}"><div class="result-hero"><h2>${heroTitle}</h2><div class="result-badge">⚙️ ${badgeText}</div><div class="result-zopt">${heroValue}</div><div class="result-note">${extraNote}</div></div><div class="result-body"><div class="result-section-title">${hasInfinite ? "Một phương án cực biên tối ưu" : "Giá trị các biến quyết định"}</div><div class="var-grid">${varCardsHTML}</div>${vecHTML}${graphHTML}<div class="result-actions"><button class="btn-modern btn-outline" onclick="showView(2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> Xem lại các bước</button><button class="btn-modern btn-outline" onclick="window.print()">🖨 In / Lưu PDF</button><button class="btn-modern btn-outline" onclick="copyResult()">📋 Sao chép</button><button class="btn-modern btn-primary" onclick="location.reload()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Giải bài toán mới</button></div></div></div>`;
 
   document.getElementById("view-result").innerHTML = resultHTML;
   showView(2);
@@ -949,9 +1061,10 @@ function lineEnds(a1, a2, c, L) {
   return [pts[0], pts.reduce((b, q) => (d(q) > d(b) ? q : b))];
 }
 
-function renderGraph(lp, sol) {
-  const [sx, sy] = [toNum(sol[0]), toNum(sol[1])];
+function renderGraph(lp, sol, status = "OPTIMAL", alt = null) {
+  const [sx, sy] = sol ? [toNum(sol[0]), toNum(sol[1])] : [0, 0];
   let ref = [sx, sy, 1];
+  if (alt) ref.push(toNum(alt[0]), toNum(alt[1]));
   lp.A.forEach((r, i) =>
     r.forEach((a, j) => {
       if (a !== 0 && lp.B[i] / a > 0) ref.push(lp.B[i] / a);
@@ -999,9 +1112,57 @@ function renderGraph(lp, sol) {
     svg += `<line x1="${X(e[0][0])}" y1="${Y(e[0][1])}" x2="${X(e[1][0])}" y2="${Y(e[1][1])}" stroke="${col}" stroke-width="2"/><text x="${X(e[1][0]) - 4}" y="${Y(e[1][1]) + 14}" font-size="12" font-weight="700" fill="${col}">(${i + 1})</text>`;
   });
   const z = lp.C[0] * sx + lp.C[1] * sy;
-  const oe = lp.C[0] || lp.C[1] ? lineEnds(lp.C[0], lp.C[1], z, L) : null;
+  const oe =
+    sol && (lp.C[0] || lp.C[1]) ? lineEnds(lp.C[0], lp.C[1], z, L) : null;
   if (oe)
     svg += `<line x1="${X(oe[0][0])}" y1="${Y(oe[0][1])}" x2="${X(oe[1][0])}" y2="${Y(oe[1][1])}" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4"/>`;
-  svg += `<circle cx="${X(sx)}" cy="${Y(sy)}" r="6" fill="#ef4444" stroke="#fff" stroke-width="2"/><text x="${X(sx) + 10}" y="${Y(sy) - 10}" font-size="12" font-weight="700" fill="#b91c1c">(${sol[0]}, ${sol[1]})</text></svg>`;
-  return `<div class="graph-card"><div class="result-section-title">Minh họa hình học (phương pháp đồ thị)</div>${svg}<div class="graph-legend"><span><i style="background:#10b981"></i>Miền khả thi</span><span><i style="background:#ef4444"></i>Đường mức hàm mục tiêu &amp; điểm tối ưu</span></div></div>`;
+  if (alt)
+    svg += `<line x1="${X(sx)}" y1="${Y(sy)}" x2="${X(toNum(alt[0]))}" y2="${Y(toNum(alt[1]))}" stroke="#ef4444" stroke-width="6" opacity=".55" stroke-linecap="round"/><circle cx="${X(toNum(alt[0]))}" cy="${Y(toNum(alt[1]))}" r="6" fill="#f97316" stroke="#fff" stroke-width="2"/>`;
+  svg += !sol
+    ? "</svg>"
+    : `<circle cx="${X(sx)}" cy="${Y(sy)}" r="6" fill="#ef4444" stroke="#fff" stroke-width="2"/><text x="${X(sx) + 10}" y="${Y(sy) - 10}" font-size="12" font-weight="700" fill="#b91c1c">(${sol[0]}, ${sol[1]})</text></svg>`;
+  const note = {
+    INFEASIBLE:
+      "Các ràng buộc không có điểm chung: miền khả thi rỗng, nên bài toán vô nghiệm.",
+    UNBOUNDED:
+      "Miền khả thi không bị chặn theo hướng làm hàm mục tiêu tốt lên mãi, nên bài toán không giới hạn.",
+    OPTIMAL: alt
+      ? "Đoạn đỏ đậm nối hai đỉnh tối ưu: mọi điểm trên đó đều cho cùng giá trị Z."
+      : "",
+  }[status];
+  return `<div class="graph-card"><div class="result-section-title">Minh họa hình học (phương pháp đồ thị)</div>${svg}<div class="graph-note">${note}</div><div class="graph-legend"><span><i style="background:#10b981"></i>Miền khả thi</span><span><i style="background:#ef4444"></i>Đường mức hàm mục tiêu &amp; điểm tối ưu</span></div></div>`;
+}
+
+// ========================================================
+// TÍNH NĂNG MỚI: GIẢI THÍCH CÁCH TÍNH BẢNG ĐƠN HÌNH MỚI
+// ========================================================
+function buildPivotCalc(oldT, newT, pr, pc, m, tv, varNames, basis, leave, k) {
+  const br = (x) => (x.isNegative() ? `(${x})` : `${x}`);
+  const enter = varNames[pc];
+  const cols = [tv, ...Array.from({ length: tv }, (_, j) => j)];
+  const head = `<tr><th>Hàng</th>${cols.map((j) => `<th>${j === tv ? "Phương án" : varNames[j]}</th>`).join("")}</tr>`;
+  const p = oldT[pr][pc];
+  const pivRow = `<tr class="calc-pivot"><td><b>${enter}</b></td>${cols.map((j) => `<td>${oldT[pr][j]} ÷ ${br(p)} = <b>${newT[pr][j]}</b></td>`).join("")}</tr>`;
+  let others = "";
+  for (let i = 0; i < m; i++) {
+    if (i === pr) continue;
+    const f = oldT[i][pc];
+    others += `<tr><td><b>${varNames[basis[i]]}</b><br><small>a = ${f}</small></td>${cols
+      .map((j) =>
+        f.isZero()
+          ? `<td class="calc-same"><b>${newT[i][j]}</b></td>`
+          : `<td>${oldT[i][j]} − ${br(f)} × ${br(newT[pr][j])} = <b>${newT[i][j]}</b></td>`,
+      )
+      .join("")}</tr>`;
+  }
+  const step3 = others
+    ? `<p><b>Bước 3: Khử cột ${enter} ở các hàng còn lại.</b> Hàng mới = hàng cũ − a × (hàng xoay mới), với a là phần tử của hàng đó ở cột ${enter}. Nếu a = 0 thì hàng giữ nguyên.</p><div class="calc-scroll"><table class="calc-table">${head}${others}</table></div>`
+    : "";
+  return `<details class="calc-details"><summary>🧮 Xem cách tính bảng ${k + 1} từ bảng ${k}</summary><div class="calc-body"><p><b>Bước 1: Phần tử xoay.</b> Biến <b>${enter}</b> vào cơ sở, biến <b>${leave}</b> ra khỏi cơ sở; phần tử xoay p = ${p}.</p><p><b>Bước 2: Chia hàng xoay cho p.</b> Hàng mới = hàng cũ ÷ p.</p><div class="calc-scroll"><table class="calc-table">${head}${pivRow}</table></div>${step3}<p><b>Bước ${others ? 4 : 3}: Tính lại dòng Δ.</b> Δ<sub>j</sub> = Z<sub>j</sub> − C<sub>j</sub> = Σ C<sub>B</sub>·a<sub>ij</sub> − C<sub>j</sub>, dùng hệ số C<sub>B</sub> và các cột của bảng ${k + 1}.</p></div></details>`;
+}
+
+function toggleAllCalc() {
+  const ds = [...document.querySelectorAll(".calc-details")];
+  const open = ds.some((d) => !d.open);
+  ds.forEach((d) => (d.open = open));
 }
